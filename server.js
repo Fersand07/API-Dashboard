@@ -10,6 +10,19 @@ const { getUsers, deleteUser } = require('./users');
 
 
 const server = http.createServer((req, res) => {
+
+    // Configuración de CORS
+    res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1:5500');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+    // Manejo de preflight (OPTIONS)
+    if (req.method === 'OPTIONS') {
+        // Responder al preflight request de CORS
+        res.writeHead(204); // Sin contenido
+        res.end();
+        return;
+    }
     if (req.url === '/register' && req.method === 'POST') {
         handleRequest(req, res, registerHandler);
     } 
@@ -24,7 +37,7 @@ const server = http.createServer((req, res) => {
     } 
     else if (req.url === '/inventory' && req.method === 'GET') {
         handleRequest(req, res, getInventoryHandler);
-    } 
+    }
     else if (req.url === '/inventory' && req.method === 'POST') {
         handleRequest(req, res, createInventoryHandler);
     } 
@@ -37,22 +50,7 @@ const server = http.createServer((req, res) => {
         deleteInventoryHandler(req, id, res);
     }
     else if (req.url === '/suppliers' && req.method === 'GET') {
-        handleRequest(req, res, async () => {
-            try {
-                const user = await authenticateRequest(req); // Verifica el token
-                console.log('Authenticated user:', user); // Verifica el usuario autenticado
-    
-                const suppliers = await getSuppliers(); // Función para obtener los proveedores
-                handleSuccess(res, 'Suppliers retrieved', { suppliers });
-            } catch (err) {
-                console.error('Error retrieving suppliers:', err.message);
-                if (err.message === 'Invalid or expired token') {
-                    handleError(res, 401, 'Unauthorized: Invalid token');
-                } else {
-                    handleError(res, 500, 'Failed to retrieve suppliers');
-                }
-            }
-        });
+        handleRequest(req, res, getSuppliersHandler);
     }
     else if(req.url === '/suppliers' && req.method === 'POST') {
         handleRequest(req, res, async (body) => {
@@ -107,23 +105,7 @@ const server = http.createServer((req, res) => {
     }
 
     else if (req.url === '/users' && req.method === 'GET') {
-        handleRequest(req, res, async () => {
-            try {
-                const user = await authenticateRequest(req); // Verifica el token
-                console.log('Authenticated user:', user);
-    
-                // Verificar que el usuario tiene permisos para ver la lista de usuarios
-                if (user.role !== 'admin' && user.role !== 'super_admin') {
-                    return handleError(res, 403, 'Permission denied');
-                }
-    
-                const users = await getUsers(); // Obtener todos los usuarios
-                handleSuccess(res, 'Users retrieved', { users });
-            } catch (err) {
-                console.error('Error retrieving users:', err.message);
-                handleError(res, 500, 'Failed to retrieve users');
-            }
-        });
+        handleRequest(req, res, getUsersHandler);
     }
     else if (req.url.startsWith('/users/') && req.method === 'DELETE') {
         const id = req.url.split('/').pop();
@@ -166,19 +148,22 @@ const server = http.createServer((req, res) => {
 // Registro de usuario
 async function registerHandler(body, res) {
     const missingField = validateFields(['username', 'email', 'firstName', 'lastName', 'password'], body);
-    if (missingField) return handleError(res, 400, `${missingField} is required`);
+    if (missingField) {
+        return handleError(res, 400, `${missingField} is required`); // Ya envía una respuesta
+    }
 
     try {
         const { username, email, firstName, lastName, password } = body;
         const user = await registerUser(username, email, firstName, lastName, password);
-        handleSuccess(res, 'User registered', { 
-            user: { id: user.id, username: user.username, email: user.email, role: user.role } 
+        return handleSuccess(res, 'User registered', { 
+            user: { id: user.id, username: user.username, email: user.email, role: user.role }
         });
     } catch (err) {
         console.error('Error registering user:', err);
-        handleError(res, 500, 'Failed to register user');
+        return handleError(res, 500, 'Failed to register user'); // Asegúrate de que no se envíen múltiples respuestas
     }
 }
+
 
 // Inicio de sesión
 async function loginHandler(body, res) {
@@ -302,7 +287,9 @@ function handleRequest(req, res, callback) {
             try {
                 callback(JSON.parse(body), res);
             } catch (err) {
-                handleError(res, 400, 'Invalid JSON format');
+                if (!res.headersSent) { // Verifica si ya se envió una respuesta
+                    handleError(res, 400, 'Invalid JSON format');
+                }
             }
         });
     }
@@ -371,6 +358,6 @@ server.listen(port, () => {
     console.log(`Server running on http://localhost:${port}/`);
 });
 
-server.on('request', (req, res) => {
-    res.setHeader('X-Powered-By', 'Dashboard');
-});
+// server.on('request', (req, res) => {
+//     // res.setHeader('X-Powered-By', 'Dashboard');
+// });
